@@ -1,6 +1,22 @@
 ---
 # roles/proxmox_deprovision/tasks/proxmox.yml
 
+- name: Stop the VM before deletion when force is enabled
+  ansible.builtin.command:
+    argv:
+      - qm
+      - stop
+      - "{{ vmid }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_stop_result
+  changed_when: qm_stop_result.rc == 0
+  failed_when: >-
+    qm_stop_result.rc != 0
+    and 'not found' not in (qm_stop_result.stderr | default('') | lower)
+    and 'not running' not in (qm_stop_result.stderr | default('') | lower)
+  when: delete_force | bool
+
 - name: Delete VM from Proxmox
   ansible.builtin.command:
     argv:
@@ -8,8 +24,13 @@
       - destroy
       - "{{ vmid }}"
       - --purge
+      - --destroy-unreferenced-disks
+      - "{{ delete_destroy_disk | ternary('1', '0') }}"
   delegate_to: "{{ node_name }}"
   become: true
   register: qm_destroy_result
   changed_when: qm_destroy_result.rc == 0
   failed_when: qm_destroy_result.rc != 0 and 'not found' not in (qm_destroy_result.stderr | default('') | lower)
+  retries: 5
+  delay: 3
+  until: qm_destroy_result.rc == 0 or 'not found' in (qm_destroy_result.stderr | default('') | lower)
