@@ -3,10 +3,10 @@
 
 - name: Merge Proxmox defaults
   set_fact:
-    proxmox: >-
+    proxmox_merged: >-
       {{
         proxmox_defaults
-        | combine(proxmox | default({}), recursive=True)
+        | combine((proxmox | default({})) if proxmox is defined else {}, recursive=True)
       }}
 
 - name: Ensure vms_to_delete present

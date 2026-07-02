@@ -3,7 +3,7 @@
 
 - name: Prepare safe defaults
   set_fact:
-    proxmox_cb: "{{ proxmox if (proxmox is defined) else {} }}"
+    proxmox_cb: "{{ proxmox_merged if (proxmox_merged is defined) else {} }}"
     proxmox_defaults_cb: "{{ proxmox_defaults if (proxmox_defaults is defined) else {} }}"
   run_once: false
 
