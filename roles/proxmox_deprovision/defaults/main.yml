@@ -5,6 +5,8 @@ proxmox_defaults:
   node: pve01.lab.sal9000.tech
   timeout: 300
 
+proxmox_config: {}
+
 netbox:
   api_url: ""
   token: ""

@@ -6,7 +6,7 @@
     proxmox_merged: >-
       {{
         proxmox_defaults
-        | combine((proxmox | default({})) if proxmox is defined else {}, recursive=True)
+        | combine((proxmox_config | default({})) if proxmox_config is defined else {}, recursive=True)
       }}
 
 - name: Ensure vms_to_delete present

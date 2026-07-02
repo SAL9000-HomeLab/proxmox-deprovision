@@ -4,5 +4,5 @@
   gather_facts: false
   roles:
     - role: proxmox_deprovision
-      proxmox: "{{ proxmox | default({}) }}"
+      proxmox_config: "{{ proxmox | default({}) }}"
       vms_to_delete: "{{ vms_to_delete }}"

@@ -25,8 +25,8 @@ netbox:
   ssl_verify: true
 
 vms_to_delete:
-  - name: my-vm-01
-    vmid: 100
+  - name: W25C-TEST001
+    vmid: 3021
     force: true
     destroy_disk: true
 ```
