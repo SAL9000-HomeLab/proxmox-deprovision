@@ -3,8 +3,6 @@
 
 - name: Delete VM from Proxmox
   ansible.builtin.command:
-    cmd: >-
-      qm destroy {{ vmid }} --purge
     argv:
       - qm
       - destroy
