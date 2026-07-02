@@ -26,20 +26,27 @@
       - (vmid | int) > 0
     fail_msg: "Each vms_to_delete item must define a positive vmid."
 
-- name: Run qm list on node to discover existing VMs
-  ansible.builtin.command:
-    cmd: qm list
-  delegate_to: "{{ node_name }}"
-  become: true
-  register: qm_list_full
-  changed_when: false
-
-- name: Determine if target vmid exists on node
+- name: Build candidate node list
   set_fact:
-    target_exists: "{{ (qm_list_full.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0 }}"
+    candidate_nodes: >-
+      {{
+        [node_name]
+        + (
+          proxmox_cb.get('cluster_nodes', [])
+          if proxmox_cb is mapping and proxmox_cb.get('cluster_nodes') is defined
+          else []
+        )
+      | unique }}
   run_once: false
+
+- name: Check target VM presence on each candidate node
+  include_tasks: check_vm_on_node.yml
+  loop: "{{ candidate_nodes }}"
+  loop_control:
+    loop_var: cluster_node
+  when: not target_exists | default(false)
 
 - name: Fail when target VM is absent
   fail:
-    msg: "VM {{ vmid }} not found on node {{ node_name }}."
-  when: not target_exists
+    msg: "VM {{ vmid }} not found on any accessible cluster node."
+  when: not target_exists | default(false)

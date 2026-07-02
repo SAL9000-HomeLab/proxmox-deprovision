@@ -1,0 +1,21 @@
+---
+# roles/proxmox_deprovision/tasks/check_vm_on_node.yml
+
+- name: Query qm list on cluster node {{ cluster_node }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - list
+  delegate_to: "{{ cluster_node }}"
+  become: true
+  register: qm_list_cluster_node
+  changed_when: false
+
+- name: Mark this node as the VM host when the vmid is present
+  set_fact:
+    target_exists: true
+    node_name: "{{ cluster_node }}"
+  when: >-
+    {{
+      (qm_list_cluster_node.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0
+    }}

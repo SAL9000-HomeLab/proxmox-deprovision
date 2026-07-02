@@ -17,6 +17,10 @@ This repository deprovisions VMs from Proxmox and can remove matching NetBox IP 
 ```yaml
 proxmox:
   node: pve01.lab.sal9000.tech
+  cluster_nodes:
+    - pve01.lab.sal9000.tech
+    - pve02.lab.sal9000.tech
+    - pve03.lab.sal9000.tech
 
 netbox_cleanup: true
 netbox:
@@ -30,6 +34,15 @@ vms_to_delete:
     force: true
     destroy_disk: true
 ```
+
+## AWX / inventory guidance
+
+This role can be driven either from AWX inventory variables or from job extra vars.
+
+- Best fit for AWX: job extra vars or inventory group vars for `vms_to_delete` and `proxmox.cluster_nodes`.
+  This keeps the VM list and cluster-node list explicit for each deprovision run.
+- The Proxmox inventory host can still provide the base connection details, such as the primary node and SSH credentials, but it is usually not the best place to store the per-run VM list.
+- If you want the VM list to come from inventory, you can also place `vms_to_delete` under a group or host var, but that is less flexible for one-off deletions than extra vars.
 
 ## Usage
 
