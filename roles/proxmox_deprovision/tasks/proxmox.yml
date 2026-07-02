@@ -1,0 +1,17 @@
+---
+# roles/proxmox_deprovision/tasks/proxmox.yml
+
+- name: Delete VM from Proxmox
+  ansible.builtin.command:
+    cmd: >-
+      qm destroy {{ vmid }} --purge
+    argv:
+      - qm
+      - destroy
+      - "{{ vmid }}"
+      - --purge
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_destroy_result
+  changed_when: qm_destroy_result.rc == 0
+  failed_when: qm_destroy_result.rc != 0 and 'not found' not in (qm_destroy_result.stderr | default('') | lower)

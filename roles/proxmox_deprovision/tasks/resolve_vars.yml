@@ -1,0 +1,45 @@
+---
+# roles/proxmox_deprovision/tasks/resolve_vars.yml
+
+- name: Prepare safe defaults
+  set_fact:
+    proxmox_cb: "{{ proxmox if (proxmox is defined) else {} }}"
+    proxmox_defaults_cb: "{{ proxmox_defaults if (proxmox_defaults is defined) else {} }}"
+  run_once: false
+
+- name: Prepare VM variables
+  set_fact:
+    node_name: >-
+      {{ vm_item.node
+         | default( proxmox_cb.get('node') | default(proxmox_defaults_cb.get('node','pve01')) ) }}
+    vm_name: "{{ vm_item.name | default(vm_item.vmid | string) }}"
+    vmid: >-
+      {{ vm_item.vmid | default(0) | int }}
+    delete_force: "{{ vm_item.force | default(true) | bool }}"
+    delete_destroy_disk: "{{ vm_item.destroy_disk | default(true) | bool }}"
+  run_once: false
+
+- name: Validate VM target
+  assert:
+    that:
+      - vmid is defined
+      - (vmid | int) > 0
+    fail_msg: "Each vms_to_delete item must define a positive vmid."
+
+- name: Run qm list on node to discover existing VMs
+  ansible.builtin.command:
+    cmd: qm list
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_list_full
+  changed_when: false
+
+- name: Determine if target vmid exists on node
+  set_fact:
+    target_exists: "{{ (qm_list_full.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0 }}"
+  run_once: false
+
+- name: Fail when target VM is absent
+  fail:
+    msg: "VM {{ vmid }} not found on node {{ node_name }}."
+  when: not target_exists

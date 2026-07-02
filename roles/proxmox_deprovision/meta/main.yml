@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  author: your-team
+  description: Delete Proxmox VMs and remove matching NetBox IP address records
+  license: MIT
+  min_ansible_version: 2.12
+  platforms:
+    - name: Debian
+      versions:
+        - buster
+        - bullseye
+  categories:
+    - virtualization
+
+dependencies: []

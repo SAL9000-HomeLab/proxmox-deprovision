@@ -1,0 +1,14 @@
+---
+# roles/proxmox_deprovision/defaults/main.yml
+
+proxmox_defaults:
+  node: pve01.lab.sal9000.tech
+  timeout: 300
+
+netbox:
+  api_url: ""
+  token: ""
+  ssl_verify: true
+
+netbox_cleanup: true
+vms_to_delete: []

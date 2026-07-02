@@ -1,0 +1,50 @@
+---
+# roles/proxmox_deprovision/tasks/netbox.yml
+
+- name: Resolve NetBox credential variables
+  set_fact:
+    netbox_resolved_api_url: "{{ (netbox | default({})).api_url | default(netbox_api_url | default('')) }}"
+    netbox_resolved_token: "{{ (netbox | default({})).token | default(netbox_token | default('')) }}"
+    netbox_resolved_ssl_verify: "{{ (netbox | default({})).ssl_verify | default(true) | bool }}"
+  run_once: false
+
+- name: Skip NetBox cleanup when disabled
+  debug:
+    msg: "Skipping NetBox cleanup because netbox_cleanup is false."
+  when: not (netbox_cleanup | default(true) | bool)
+
+- name: Lookup matching NetBox IP addresses by DNS name or VM name
+  uri:
+    url: >-
+      {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/?q={{ vm_name | urlencode }}
+    method: GET
+    headers:
+      Authorization: "Token {{ netbox_resolved_token }}"
+      Accept: "application/json"
+    validate_certs: "{{ netbox_resolved_ssl_verify }}"
+    return_content: true
+  register: netbox_ip_lookup
+  when:
+    - (netbox_cleanup | default(true) | bool)
+    - netbox_resolved_api_url | length > 0
+    - netbox_resolved_token | length > 0
+
+- name: Delete matching NetBox IP address records
+  uri:
+    url: >-
+      {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/{{ item.id }}/
+    method: DELETE
+    headers:
+      Authorization: "Token {{ netbox_resolved_token }}"
+      Accept: "application/json"
+    validate_certs: "{{ netbox_resolved_ssl_verify }}"
+    status_code: [200, 204, 404]
+  loop: "{{ netbox_ip_lookup.json.results | default([]) }}"
+  loop_control:
+    label: "{{ item.address | default(item.id) }}"
+  when:
+    - (netbox_cleanup | default(true) | bool)
+    - netbox_resolved_api_url | length > 0
+    - netbox_resolved_token | length > 0
+    - netbox_ip_lookup is defined
+    - netbox_ip_lookup.status | default(0) == 200

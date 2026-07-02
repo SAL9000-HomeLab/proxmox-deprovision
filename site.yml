@@ -1,0 +1,8 @@
+---
+- name: Deprovision VMs from Proxmox and NetBox
+  hosts: proxmox
+  gather_facts: false
+  roles:
+    - role: proxmox_deprovision
+      proxmox: "{{ proxmox | default({}) }}"
+      vms_to_delete: "{{ vms_to_delete }}"

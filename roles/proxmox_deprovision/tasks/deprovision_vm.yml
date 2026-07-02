@@ -1,0 +1,12 @@
+---
+# roles/proxmox_deprovision/tasks/deprovision_vm.yml
+# Per-VM deprovision orchestrator.
+
+- name: Resolve variables
+  ansible.builtin.import_tasks: resolve_vars.yml
+
+- name: Delete the VM from Proxmox if it exists
+  ansible.builtin.import_tasks: proxmox.yml
+
+- name: Remove matching NetBox IP address records if enabled
+  ansible.builtin.import_tasks: netbox.yml
