@@ -11,11 +11,16 @@
   register: qm_list_cluster_node
   changed_when: false
 
+- name: Determine whether the VM exists on this node
+  set_fact:
+    vm_exists_on_this_node: >-
+      {{
+        (qm_list_cluster_node.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0
+      }}
+  run_once: false
+
 - name: Mark this node as the VM host when the vmid is present
   set_fact:
     target_exists: true
     node_name: "{{ cluster_node }}"
-  when: >-
-    {{
-      (qm_list_cluster_node.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0
-    }}
+  when: vm_exists_on_this_node | bool
