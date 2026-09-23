@@ -1,6 +1,28 @@
 ---
 # roles/proxmox_deprovision/tasks/proxmox.yml
 
+- name: Check VM power state
+  ansible.builtin.command:
+    cmd: "qm status {{ vmid }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_status_result
+  changed_when: false
+
+- name: Stop running VM before deletion when force is enabled
+  ansible.builtin.command:
+    argv:
+      - qm
+      - stop
+      - "{{ vmid }}"
+      - --timeout
+      - "{{ delete_timeout }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  when:
+    - delete_force
+    - "'status: running' in qm_status_result.stdout"
+
 - name: Delete VM from Proxmox
   ansible.builtin.command:
     argv:
