@@ -12,5 +12,13 @@ netbox:
   token: ""
   ssl_verify: true
 
+technitium_dns:
+  enabled: false
+  api_url: ""
+  api_port: 5380
+  api_token: ""
+  validate_certs: true
+  zone: ""
+
 netbox_cleanup: true
 vms_to_delete: []

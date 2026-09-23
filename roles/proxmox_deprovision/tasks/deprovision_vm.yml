@@ -5,6 +5,9 @@
 - name: Resolve variables
   ansible.builtin.import_tasks: resolve_vars.yml
 
+- name: Remove VM DNS records from Technitium DNS
+  ansible.builtin.import_tasks: technitium_dns.yml
+
 - name: Delete the VM from Proxmox if it exists
   ansible.builtin.import_tasks: proxmox.yml
 
