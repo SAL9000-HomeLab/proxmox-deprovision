@@ -45,3 +45,17 @@
   fail:
     msg: "VM {{ vmid }} not found on node {{ node_name }}."
   when: not target_exists
+
+- name: Read VM configuration before deletion
+  ansible.builtin.command:
+    cmd: "qm config {{ vmid }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_config
+  changed_when: false
+
+- name: Resolve the VM IPv4 address for DNS cleanup
+  ansible.builtin.set_fact:
+    vm_ip_address: "{{ (qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\\1') | first | default('')) }}"
+    vm_reverse_name: "{{ ((qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\\1') | first | default('')).split('.') | reverse | join('.')) ~ '.in-addr.arpa' }}"
+  run_once: false
