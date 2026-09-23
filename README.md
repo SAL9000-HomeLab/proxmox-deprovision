@@ -27,10 +27,8 @@ netbox:
 
 technitium_dns:
   enabled: true
-  api_url: "https://dns.example.com"
   api_port: 53443
-  api_token: "YOUR_API_TOKEN"
-  validate_certs: true
+  validate_certs: false
   zone: "lab.sal9000.tech"
 
 vms_to_delete:
@@ -58,3 +56,6 @@ The role will:
 Technitium cleanup derives the reverse lookup name from the VM IP and queries that
 name for PTR records, so no reverse zone needs to be configured. The forward zone
 may be overridden per VM with `dns_zone`, and the full record name with `dns_name`.
+
+For AWX, inject the credential as `technitium_dns_api_url` and
+`technitium_dns_api_token`. Keep the API token out of job extra vars.
