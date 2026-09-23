@@ -8,6 +8,10 @@
     technitium_dns_resolved_token: "{{ (technitium_dns | default({})).api_token | default((technitium_dns | default({})).token | default(technitium_dns_api_token | default(''))) }}"
     technitium_dns_resolved_zone: "{{ vm_item.dns_zone | default((technitium_dns | default({})).zone | default('')) }}"
     technitium_dns_resolved_validate_certs: "{{ (technitium_dns | default({})).validate_certs | default(true) | bool }}"
+  run_once: false
+
+- name: Resolve the Technitium DNS record name
+  ansible.builtin.set_fact:
     technitium_dns_resolved_name: "{{ vm_item.dns_name | default(vm_name ~ '.' ~ technitium_dns_resolved_zone) }}"
   run_once: false
 
