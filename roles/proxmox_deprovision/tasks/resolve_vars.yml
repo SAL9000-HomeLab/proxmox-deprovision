@@ -16,9 +16,10 @@
     vmid: >-
       {{ vm_item.vmid | default(0) | int }}
     delete_force: "{{ vm_item.force | default(true) | bool }}"
-    delete_destroy_disk: "{{ vm_item.destroy_disk | default(true) | bool }}"
     delete_timeout: >-
       {{ proxmox_cb.get('timeout', proxmox_defaults_cb.get('timeout', 300)) | int }}
+    snippets_dir: >-
+      {{ proxmox_cb.get('snippets_dir', proxmox_defaults_cb.get('snippets_dir', '/var/lib/vz/snippets')) | regex_replace('/+$', '') }}
   run_once: false
 
 - name: Validate VM target

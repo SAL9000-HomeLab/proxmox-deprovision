@@ -2,8 +2,9 @@
 # roles/proxmox_deprovision/defaults/main.yml
 
 proxmox_defaults:
-  node: pve01.lab.sal9000.tech
+  node: pve01.lab.example.com
   timeout: 300
+  snippets_dir: /var/lib/vz/snippets
 
 proxmox_config: {}
 

@@ -35,3 +35,15 @@
   register: qm_destroy_result
   changed_when: qm_destroy_result.rc == 0
   failed_when: qm_destroy_result.rc != 0 and 'not found' not in (qm_destroy_result.stderr | default('') | lower)
+
+# proxmox-deploy uploads per-VM userdata as user-data-<vmid> (Linux) or
+# cloudbase-<vmid> (Windows); the Windows one embeds the domain-join password.
+- name: Remove the VM's cloud-init/cloudbase-init snippets
+  ansible.builtin.file:
+    path: "{{ snippets_dir }}/{{ item }}{{ vmid }}"
+    state: absent
+  loop:
+    - user-data-
+    - cloudbase-
+  delegate_to: "{{ node_name }}"
+  become: true
