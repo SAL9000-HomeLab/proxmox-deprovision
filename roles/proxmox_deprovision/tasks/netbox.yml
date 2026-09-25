@@ -29,7 +29,11 @@
     - netbox_resolved_api_url | length > 0
     - netbox_resolved_token | length > 0
 
-- name: Delete matching NetBox IP address records
+# `q` is a substring search across address, dns_name and description, so
+# deleting web-01 would also match web-010 or any record mentioning it.
+# Only delete records that are exactly this VM's: same IP as its ipconfig0,
+# or a dns_name whose host part equals the VM name.
+- name: Delete NetBox IP address records that belong to this VM
   uri:
     url: >-
       {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/{{ item.id }}/
@@ -48,3 +52,6 @@
     - netbox_resolved_token | length > 0
     - netbox_ip_lookup is defined
     - netbox_ip_lookup.status | default(0) == 200
+    - >-
+      ((item.address | default('')).split('/') | first) == vm_ip_address
+      or ((item.dns_name | default('') | lower).split('.') | first) == (vm_name | lower)
