@@ -2,13 +2,13 @@
 # roles/proxmox_deprovision/tasks/resolve_vars.yml
 
 - name: Prepare safe defaults
-  set_fact:
+  ansible.builtin.set_fact:
     proxmox_cb: "{{ proxmox_merged if (proxmox_merged is defined) else {} }}"
     proxmox_defaults_cb: "{{ proxmox_defaults if (proxmox_defaults is defined) else {} }}"
   run_once: false
 
 - name: Prepare VM variables
-  set_fact:
+  ansible.builtin.set_fact:
     node_name: >-
       {{ vm_item.node
          | default( proxmox_cb.get('node') | default(proxmox_defaults_cb.get('node','pve01')) ) }}
@@ -19,11 +19,12 @@
     delete_timeout: >-
       {{ proxmox_cb.get('timeout', proxmox_defaults_cb.get('timeout', 300)) | int }}
     snippets_dir: >-
-      {{ proxmox_cb.get('snippets_dir', proxmox_defaults_cb.get('snippets_dir', '/var/lib/vz/snippets')) | regex_replace('/+$', '') }}
+      {{ proxmox_cb.get('snippets_dir', proxmox_defaults_cb.get('snippets_dir', '/var/lib/vz/snippets'))
+         | regex_replace('/+$', '') }}
   run_once: false
 
 - name: Validate VM target
-  assert:
+  ansible.builtin.assert:
     that:
       - vmid is defined
       - (vmid | int) > 0
@@ -38,12 +39,13 @@
   changed_when: false
 
 - name: Determine if target vmid exists on node
-  set_fact:
-    target_exists: "{{ (qm_list_full.stdout_lines | select('match', '^\\s*' + (vmid | string) + '\\s') | list) | length > 0 }}"
+  ansible.builtin.set_fact:
+    target_exists: >-
+      {{ (qm_list_full.stdout_lines | select('match', '^\s*' + (vmid | string) + '\s') | list) | length > 0 }}
   run_once: false
 
 - name: Fail when target VM is absent
-  fail:
+  ansible.builtin.fail:
     msg: "VM {{ vmid }} not found on node {{ node_name }}."
   when: not target_exists
 
@@ -57,6 +59,10 @@
 
 - name: Resolve the VM IPv4 address for DNS cleanup
   ansible.builtin.set_fact:
-    vm_ip_address: "{{ (qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\\1') | first | default('')) }}"
-    vm_reverse_name: "{{ ((qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\\1') | first | default('')).split('.') | reverse | join('.')) ~ '.in-addr.arpa' }}"
+    vm_ip_address: >-
+      {{ (qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\1')
+          | first | default('')) }}
+    vm_reverse_name: >-
+      {{ ((qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\1')
+           | first | default('')).split('.') | reverse | join('.')) ~ '.in-addr.arpa' }}
   run_once: false
