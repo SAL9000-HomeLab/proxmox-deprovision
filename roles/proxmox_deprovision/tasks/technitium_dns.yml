@@ -34,11 +34,26 @@
     validate_certs: "{{ technitium_dns_resolved_validate_certs }}"
     name: "{{ vm_reverse_name }}"
   register: technitium_dns_ptr_lookup
+  # get_record fails when nothing matches (or the reverse zone doesn't exist);
+  # for cleanup that just means there's nothing to delete. Other API errors
+  # (auth, connectivity) still fail the job.
+  failed_when:
+    - technitium_dns_ptr_lookup.failed | default(false)
+    - technitium_dns_ptr_lookup.msg | default('') is not search('No records found|No such zone')
   when:
     - (technitium_dns | default({})).enabled | default(true) | bool
     - technitium_dns_resolved_api_url | length > 0
     - technitium_dns_resolved_token | length > 0
     - vm_ip_address | length > 0
+
+- name: Log when there are no PTR records to remove
+  ansible.builtin.debug:
+    msg: >-
+      No PTR records found for {{ vm_reverse_name }} ({{ vm_ip_address }});
+      skipping PTR cleanup.
+  when:
+    - technitium_dns_ptr_lookup is not skipped
+    - technitium_dns_ptr_lookup.records | default([]) | length == 0
 
 - name: Delete PTR records that point to this VM name
   effectivelywild.technitium_dns.technitium_dns_delete_record:
@@ -67,8 +82,18 @@
     zone: "{{ technitium_dns_resolved_zone }}"
     type: A
     ipAddress: "{{ vm_ip_address }}"
+  register: technitium_dns_a_delete
   when:
     - (technitium_dns | default({})).enabled | default(true) | bool
     - technitium_dns_resolved_api_url | length > 0
     - technitium_dns_resolved_token | length > 0
     - vm_ip_address | length > 0
+
+- name: Log when there was no A record to remove
+  ansible.builtin.debug:
+    msg: >-
+      No A record found for {{ technitium_dns_resolved_name }} -> {{ vm_ip_address }};
+      skipping A record cleanup. ({{ technitium_dns_a_delete.msg | default('') }})
+  when:
+    - technitium_dns_a_delete is not skipped
+    - not (technitium_dns_a_delete.changed | default(false))
