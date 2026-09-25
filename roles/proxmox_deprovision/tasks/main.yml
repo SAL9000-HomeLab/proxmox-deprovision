@@ -2,7 +2,7 @@
 # roles/proxmox_deprovision/tasks/main.yml
 
 - name: Merge Proxmox defaults
-  set_fact:
+  ansible.builtin.set_fact:
     proxmox_merged: >-
       {{
         proxmox_defaults
@@ -10,14 +10,16 @@
       }}
 
 - name: Ensure vms_to_delete present
-  assert:
+  ansible.builtin.assert:
     that:
       - vms_to_delete is defined
       - vms_to_delete | length > 0
-    fail_msg: "No vms_to_delete defined. Pass vms_to_delete via AWX extra vars, inventory, host_vars, or group_vars/proxmox.yml."
+    fail_msg: >-
+      No vms_to_delete defined. Pass vms_to_delete via AWX extra vars, inventory, host_vars,
+      or group_vars/proxmox.yml.
 
 - name: Deprovision VMs from list
-  include_tasks: deprovision_vm.yml
+  ansible.builtin.include_tasks: deprovision_vm.yml
   loop: "{{ vms_to_delete }}"
   loop_control:
     loop_var: vm_item

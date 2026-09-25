@@ -19,6 +19,8 @@
       - "{{ delete_timeout }}"
   delegate_to: "{{ node_name }}"
   become: true
+  register: qm_stop_result
+  changed_when: qm_stop_result.rc == 0
   when:
     - delete_force
     - "'status: running' in qm_status_result.stdout"

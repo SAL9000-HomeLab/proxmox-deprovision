@@ -2,19 +2,19 @@
 # roles/proxmox_deprovision/tasks/netbox.yml
 
 - name: Resolve NetBox credential variables
-  set_fact:
+  ansible.builtin.set_fact:
     netbox_resolved_api_url: "{{ (netbox | default({})).api_url | default(netbox_api_url | default('')) }}"
     netbox_resolved_token: "{{ (netbox | default({})).token | default(netbox_token | default('')) }}"
     netbox_resolved_ssl_verify: "{{ (netbox | default({})).ssl_verify | default(true) | bool }}"
   run_once: false
 
 - name: Skip NetBox cleanup when disabled
-  debug:
+  ansible.builtin.debug:
     msg: "Skipping NetBox cleanup because netbox_cleanup is false."
   when: not (netbox_cleanup | default(true) | bool)
 
 - name: Lookup matching NetBox IP addresses by DNS name or VM name
-  uri:
+  ansible.builtin.uri:
     url: >-
       {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/?q={{ vm_name | urlencode }}
     method: GET
@@ -34,7 +34,7 @@
 # Only delete records that are exactly this VM's: same IP as its ipconfig0,
 # or a dns_name whose host part equals the VM name.
 - name: Delete NetBox IP address records that belong to this VM
-  uri:
+  ansible.builtin.uri:
     url: >-
       {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/{{ item.id }}/
     method: DELETE
