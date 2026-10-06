@@ -17,3 +17,4 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
   every result of a substring search, so `web-01` also removed `web-010`. (PR #3)
 - Added: The VM's `user-data-<vmid>` / `cloudbase-<vmid>` snippets are removed from the node. (PR #3)
 - Removed: The unused `destroy_disk` option; `qm destroy --purge` always deletes the disks. (PR #3)
+- Changed: Ansible CI runs on pull requests only, no longer on pushes to `main` (synced from ans-template).
