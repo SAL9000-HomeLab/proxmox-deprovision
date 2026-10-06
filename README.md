@@ -70,7 +70,7 @@ For AWX, inject the credential as `technitium_dns_api_url` and
 Two workflows call reusable workflows from
 [`SAL9000-HomeLab/shared-actions`](https://github.com/SAL9000-HomeLab/shared-actions):
 
-- **Ansible CI** (`.github/workflows/ansible-ci.yml`), on pushes to `main` and every pull request:
+- **Ansible CI** (`.github/workflows/ansible-ci.yml`), on every pull request:
   - `yamllint`, then `ansible-playbook --syntax-check` on `site.yml`.
   - `ansible-lint` using [`.ansible-lint`](.ansible-lint). The only rule skipped is
     `var-naming[no-role-prefix]`: the role's variables (`vms_to_delete`, `proxmox`, `netbox`,
