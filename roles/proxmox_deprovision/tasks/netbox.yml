@@ -8,6 +8,13 @@
     netbox_resolved_ssl_verify: "{{ (netbox | default({})).ssl_verify | default(true) | bool }}"
   run_once: false
 
+# v2 tokens (NetBox 4.5+) look like nbt_<key>.<token> and use Bearer; v1 tokens (deprecated in 4.6) use Token.
+- name: Build the NetBox authorization header
+  ansible.builtin.set_fact:
+    netbox_resolved_authorization: >-
+      {{ ('Bearer ' if netbox_resolved_token.startswith('nbt_') else 'Token ') ~ netbox_resolved_token }}
+  no_log: true
+
 - name: Skip NetBox cleanup when disabled
   ansible.builtin.debug:
     msg: "Skipping NetBox cleanup because netbox_cleanup is false."
@@ -19,7 +26,7 @@
       {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/?q={{ vm_name | urlencode }}
     method: GET
     headers:
-      Authorization: "Token {{ netbox_resolved_token }}"
+      Authorization: "{{ netbox_resolved_authorization }}"
       Accept: "application/json"
     validate_certs: "{{ netbox_resolved_ssl_verify }}"
     return_content: true
@@ -39,7 +46,7 @@
       {{ netbox_resolved_api_url.rstrip('/') }}/api/ipam/ip-addresses/{{ item.id }}/
     method: DELETE
     headers:
-      Authorization: "Token {{ netbox_resolved_token }}"
+      Authorization: "{{ netbox_resolved_authorization }}"
       Accept: "application/json"
     validate_certs: "{{ netbox_resolved_ssl_verify }}"
     status_code: [200, 204, 404]
