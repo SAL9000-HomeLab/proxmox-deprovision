@@ -5,6 +5,8 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Fixed: NetBox v2 API tokens (`nbt_<key>.<token>`, the default since NetBox 4.5) are sent as `Bearer`; they were
+  sent as `Token`, which NetBox rejects with "Invalid authorization header". v1 tokens still use `Token`.
 - Added: CI via the shared `SAL9000-HomeLab/shared-actions` workflows: Ansible checks (yamllint,
   syntax check, ansible-lint) on pushes to `main` and pull requests, and Markdown, link and YAML
   linting on pull requests. Adds `.yamllint.yml`, `.ansible-lint`, `.markdownlint.json`,
