@@ -1,0 +1,3 @@
+# Controller (AWX/Ascender execution environment) Python packages: the AD cleanup connects to ad_cleanup_host
+# over PSRP.
+pypsrp>=0.8.0
