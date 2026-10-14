@@ -5,6 +5,8 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Fixed: NetBox cleanup deletes the records of every address the VM has in an `ipconfigN`, not only `ipconfig0`, so
+  the addresses proxmox-deploy reserves for extra network interfaces (`extra_nics`) are released too.
 - Fixed: NetBox v2 API tokens (`nbt_<key>.<token>`, the default since NetBox 4.5) are sent as `Bearer`; they were
   sent as `Token`, which NetBox rejects with "Invalid authorization header". v1 tokens still use `Token`.
 - Added: CI via the shared `SAL9000-HomeLab/shared-actions` workflows: Ansible checks (yamllint,
