@@ -5,6 +5,9 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Fixed: NetBox cleanup deletes the records of every address the VM has in an `ipconfigN`, not only `ipconfig0`, so
+  the addresses proxmox-deploy reserves for extra network interfaces (`extra_nics`) are released too.
+
 - Added: Windows VMs (Proxmox `ostype` win*, or `os_type: windows`) have their Active Directory computer object
   deleted after the VM is destroyed, with `microsoft.ad.computer` on `ad_cleanup_host` (a DC or a server with
   RSAT-AD-PowerShell), as the domain-join account by default. Skipped with a warning when `ad_cleanup_host` isn't set.

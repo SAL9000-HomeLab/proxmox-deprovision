@@ -20,6 +20,13 @@
     msg: "Skipping NetBox cleanup because netbox_cleanup is false."
   when: not (netbox_cleanup | default(true) | bool)
 
+# proxmox-deploy reserves an address for every ipconfigN (net0 and any extra_nics), all findable by the VM name:
+# net0's through its dns_name, the others through their description "<NAME> net<N> (<bridge>)".
+- name: Resolve every IPv4 address configured on the VM
+  ansible.builtin.set_fact:
+    vm_ip_addresses: >-
+      {{ qm_config.stdout | default('') | regex_findall('(?m)^ipconfig[0-9]+:.*?\bip=([0-9.]+)(?:/[0-9]+)?') }}
+
 - name: Lookup matching NetBox IP addresses by DNS name or VM name
   ansible.builtin.uri:
     url: >-
@@ -38,8 +45,8 @@
 
 # `q` is a substring search across address, dns_name and description, so
 # deleting web-01 would also match web-010 or any record mentioning it.
-# Only delete records that are exactly this VM's: same IP as its ipconfig0,
-# or a dns_name whose host part equals the VM name.
+# Only delete records that are exactly this VM's: the same IP as one of its
+# ipconfigN, or a dns_name whose host part equals the VM name.
 - name: Delete NetBox IP address records that belong to this VM
   ansible.builtin.uri:
     url: >-
@@ -60,5 +67,5 @@
     - netbox_ip_lookup is defined
     - netbox_ip_lookup.status | default(0) == 200
     - >-
-      ((item.address | default('')).split('/') | first) == vm_ip_address
+      ((item.address | default('')).split('/') | first) in vm_ip_addresses
       or ((item.dns_name | default('') | lower).split('.') | first) == (vm_name | lower)
