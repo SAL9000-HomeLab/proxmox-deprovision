@@ -5,6 +5,11 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Added: Windows VMs (Proxmox `ostype` win*, or `os_type: windows`) have their Active Directory computer object
+  deleted after the VM is destroyed, with `microsoft.ad.computer` on `ad_cleanup_host` (a DC or a server with
+  RSAT-AD-PowerShell), as the domain-join account by default. Skipped with a warning when `ad_cleanup_host` isn't set.
+- Fixed: deprovisioning a VM without a static `ipconfig0` (DHCP, or a deploy that failed before it got an IP) failed
+  with a templating error; it now skips the address-based DNS cleanup.
 - Fixed: NetBox v2 API tokens (`nbt_<key>.<token>`, the default since NetBox 4.5) are sent as `Bearer`; they were
   sent as `Token`, which NetBox rejects with "Invalid authorization header". v1 tokens still use `Token`.
 - Added: CI via the shared `SAL9000-HomeLab/shared-actions` workflows: Ansible checks (yamllint,

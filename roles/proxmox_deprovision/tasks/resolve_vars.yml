@@ -57,12 +57,31 @@
   register: qm_config
   changed_when: false
 
+# A VM without a static ipconfig0 (DHCP, or a deploy that failed before it got an IP) has no address to clean up.
 - name: Resolve the VM IPv4 address for DNS cleanup
   ansible.builtin.set_fact:
     vm_ip_address: >-
-      {{ (qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\1')
-          | first | default('')) }}
-    vm_reverse_name: >-
-      {{ ((qm_config.stdout | regex_search('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?', '\1')
-           | first | default('')).split('.') | reverse | join('.')) ~ '.in-addr.arpa' }}
+      {{ ((qm_config.stdout | regex_findall('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?')) + ['']) | first }}
   run_once: false
+
+- name: Resolve the VM reverse lookup name for DNS cleanup
+  ansible.builtin.set_fact:
+    vm_reverse_name: >-
+      {{ ((vm_ip_address.split('.') | reverse | join('.')) ~ '.in-addr.arpa') if vm_ip_address | length > 0 else '' }}
+  run_once: false
+
+# Windows when the VM's Proxmox OS type is a Windows one (they all start with "w": win11 for Windows Server
+# 2025, win10, w2k8, ...); os_type on the entry overrides it. Only Windows VMs have an AD computer object.
+- name: Work out the VM's OS and AD computer name
+  ansible.builtin.set_fact:
+    vm_ostype: >-
+      {{ ((qm_config.stdout | regex_findall('(?m)^ostype: (\S+)')) + ['other']) | first }}
+    vm_proxmox_name: >-
+      {{ ((qm_config.stdout | regex_findall('(?m)^name: (\S+)')) + [vm_name]) | first }}
+
+- name: Set the VM's OS and AD computer name
+  ansible.builtin.set_fact:
+    vm_is_windows: >-
+      {{ (vm_item.os_type == 'windows') if vm_item.os_type is defined else (vm_ostype is match('w')) }}
+    # proxmox-deploy names the computer after the VM (uppercase), unless the VM had its own hostname.
+    ad_computer_name: "{{ (vm_item.ad_computer_name | default(vm_item.hostname | default(vm_proxmox_name))) | upper }}"
