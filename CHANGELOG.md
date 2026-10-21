@@ -5,6 +5,11 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Fixed: a VM on another node than `proxmox.node` couldn't be deleted ("not found on node"; `qm` only sees its own
+  node's VMs), and a wrong `vmid` deleted whatever VM had it. The VMID is now looked up cluster-wide and deleted on
+  its own node, and the job stops before any change when the VMID is a container or a template or belongs to a VM
+  with another name than the entry's `name`. With several hosts in the `proxmox` group, the list is processed once
+  (it ran once per host).
 - Fixed: NetBox cleanup deletes the records of every address the VM has in an `ipconfigN`, not only `ipconfig0`, so
   the addresses proxmox-deploy reserves for extra network interfaces (`extra_nics`) are released too.
 
