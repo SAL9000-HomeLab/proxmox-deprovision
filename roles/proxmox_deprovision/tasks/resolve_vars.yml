@@ -9,7 +9,8 @@
 
 - name: Prepare VM variables
   ansible.builtin.set_fact:
-    node_name: >-
+    # The node the lookup runs on: any node of the cluster. The VM is deleted on the node it's actually on.
+    lookup_node: >-
       {{ vm_item.node
          | default( proxmox_cb.get('node') | default(proxmox_defaults_cb.get('node','pve01')) ) }}
     vm_name: "{{ vm_item.name | default(vm_item.vmid | string) }}"
@@ -30,24 +31,78 @@
       - (vmid | int) > 0
     fail_msg: "Each vms_to_delete item must define a positive vmid."
 
-- name: Run qm list on node to discover existing VMs
+# --- Find the VM in the cluster -------------------------------------------------------------------------------------
+# qm only sees the VMs of the node it runs on, so look the VMID up in the cluster-wide list and delete it on its own
+# node. Refuse anything that isn't this entry's VM before changing anything: a container or a template with that VMID,
+# or a VM whose name differs from the entry's name.
+- name: List the cluster's VMs, templates and containers
   ansible.builtin.command:
-    cmd: qm list
-  delegate_to: "{{ node_name }}"
+    cmd: pvesh get /cluster/resources --type vm --output-format json
+  delegate_to: "{{ lookup_node }}"
   become: true
-  register: qm_list_full
+  register: cluster_vms
   changed_when: false
 
-- name: Determine if target vmid exists on node
-  ansible.builtin.set_fact:
-    target_exists: >-
-      {{ (qm_list_full.stdout_lines | select('match', '^\s*' + (vmid | string) + '\s') | list) | length > 0 }}
-  run_once: false
+- name: Read the lookup node's Proxmox name
+  ansible.builtin.command:
+    cmd: pvesh get /cluster/status --output-format json
+  delegate_to: "{{ lookup_node }}"
+  become: true
+  register: cluster_status
+  changed_when: false
 
-- name: Fail when target VM is absent
+- name: Find the VMID in the cluster
+  ansible.builtin.set_fact:
+    # template: 0 unless Proxmox says otherwise, so the checks below can test it on every entry
+    vm_resource: >-
+      {{ ([{'template': 0}] | product(cluster_vms.stdout | from_json
+          | selectattr('vmid', 'equalto', vmid | int) | list) | map('combine') | list + [{}]) | first }}
+    lookup_pve_node: >-
+      {{ ((cluster_status.stdout | from_json | selectattr('type', 'equalto', 'node')
+           | selectattr('local', 'defined') | selectattr('local', 'equalto', 1) | map(attribute='name') | list)
+          + [lookup_node | regex_replace('[.].*$', '')]) | first }}
+
+- name: Fail when the VMID isn't in the cluster
   ansible.builtin.fail:
-    msg: "VM {{ vmid }} not found on node {{ node_name }}."
-  when: not target_exists
+    msg: "VMID {{ vmid }} ({{ vm_name }}) isn't in the Proxmox cluster; nothing was changed."
+  when: vm_resource.vmid is not defined
+
+- name: Fail when the VMID isn't this entry's VM
+  ansible.builtin.fail:
+    msg: >-
+      VMID {{ vmid }} is {{ 'a container' if vm_resource.type != 'qemu'
+      else ('the template' if (vm_resource.template | int) == 1 else 'the VM') }}
+      {{ vm_resource.name | default('(no name)') }} on {{ vm_resource.node }}
+      {{- ', not ' ~ vm_item.name
+          if (vm_item.name is defined and (vm_resource.name | default('') | upper) != (vm_item.name | upper))
+          else '' }}. Nothing was changed: check the vmid.
+  when: >-
+    vm_resource.type != 'qemu'
+    or (vm_resource.template | int) == 1
+    or (vm_item.name is defined and (vm_resource.name | default('') | upper) != (vm_item.name | upper))
+
+# qm commands for the VM run on its node: the lookup node itself, or the inventory host named after it
+# (pveNN or pveNN.<domain>) in the proxmox group.
+- name: Find the inventory host for the VM's node
+  ansible.builtin.set_fact:
+    node_name: >-
+      {{ lookup_node if vm_resource.node == lookup_pve_node
+         else ((groups['proxmox'] | default([]) | select('match', '^' ~ vm_resource.node ~ '([.]|$)') | list)
+               + ['']) | first }}
+
+- name: Fail when the VM's node isn't in the inventory
+  ansible.builtin.fail:
+    msg: >-
+      {{ vm_name }} (VMID {{ vmid }}) is on Proxmox node {{ vm_resource.node }}, which has no host in the inventory's
+      proxmox group (named {{ vm_resource.node }} or {{ vm_resource.node }}.<domain>). Add it, or set node on the
+      entry to that node's inventory host. Nothing was changed.
+  when: node_name | length == 0
+
+- name: Show the VM to delete
+  ansible.builtin.debug:
+    msg: >-
+      Deleting {{ vm_resource.name | default(vm_name) }} (VMID {{ vmid }}) on {{ vm_resource.node }}
+      ({{ node_name }})
 
 - name: Read VM configuration before deletion
   ansible.builtin.command:

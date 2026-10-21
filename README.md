@@ -19,7 +19,7 @@ Technitium DNS records and, for Windows VMs, the Active Directory computer objec
 
 ```yaml
 proxmox:
-  node: pve01.lab.example.com
+  node: pve01.lab.example.com      # any node of the cluster: it looks the VMs up (see "Which VM is deleted")
 
 netbox_cleanup: true
 netbox:
@@ -37,7 +37,7 @@ technitium_dns:
 ad_cleanup_host: mgmt-01.ad.example.com
 
 vms_to_delete:
-  - name: W25C-TEST001
+  - name: W25C-TEST001             # must be the VM's name in Proxmox (case doesn't matter)
     vmid: 3021
     force: true
 ```
@@ -55,7 +55,7 @@ ansible-playbook -i inventory/hosts.yml site.yml -e @extra-vars.yml
 
 The role will:
 
-1. Resolve the target VM on the specified Proxmox node.
+1. Find the VMID in the cluster and check it's the entry's VM (see below); stop before changing anything if not.
 2. Query the VM's configured IPv4 address and remove matching Technitium PTR and A records when enabled.
 3. Delete the VM from Proxmox using `qm destroy --purge`. This always deletes the VM's disks.
 4. Remove the VM's `user-data-<vmid>` / `cloudbase-<vmid>` snippets left by proxmox-deploy.
@@ -70,6 +70,22 @@ may be overridden per VM with `dns_zone`, and the full record name with `dns_nam
 
 For AWX, inject the credential as `technitium_dns_api_url` and
 `technitium_dns_api_token`. Keep the API token out of job extra vars.
+
+## Which VM is deleted
+
+Each entry in `vms_to_delete` names a VM by its `vmid`. The job looks the VMID up in the cluster-wide list
+(`pvesh get /cluster/resources`, run on `proxmox.node` or the entry's `node`, any node of the cluster) and runs the
+`qm` commands on the node the VM is on: the lookup node itself, or the inventory host in the `proxmox` group named
+after that node (`pve02` or `pve02.<domain>`). VMs on several nodes can be in one list.
+
+It stops before changing anything (DNS, Proxmox, AD, NetBox) when:
+
+- the VMID isn't in the cluster;
+- the VMID is a container or a template;
+- the entry has a `name` and the VM's name in Proxmox differs (a wrong `vmid`): keep `name` on every entry;
+- the VM's node has no host in the inventory's `proxmox` group.
+
+The play runs on every host in the `proxmox` group, but the list is processed once, on the first of them.
 
 ## Active Directory cleanup
 

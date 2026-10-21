@@ -18,8 +18,11 @@
       No vms_to_delete defined. Pass vms_to_delete via AWX extra vars, inventory, host_vars,
       or group_vars/proxmox.yml.
 
+# Once, on the play's first host: the play runs on every host in the proxmox group, and each VM must be deleted (and
+# its DNS, NetBox and AD records cleaned up) only once. Each VM's commands run on its own node (resolve_vars.yml).
 - name: Deprovision VMs from list
   ansible.builtin.include_tasks: deprovision_vm.yml
   loop: "{{ vms_to_delete }}"
   loop_control:
     loop_var: vm_item
+  when: inventory_hostname == ansible_play_hosts[0]
