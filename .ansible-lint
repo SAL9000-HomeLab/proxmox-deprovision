@@ -1,0 +1,12 @@
+---
+# ansible-lint configuration (run by CI via the shared ansible-ci workflow).
+exclude_paths:
+  - .venv/
+  - local/
+  - .github/
+
+skip_list:
+  # The role's public variables (vms_to_delete, proxmox, netbox, netbox_cleanup,
+  # technitium_dns, ...) are set by AWX job templates and inventories; prefixing
+  # them with proxmox_deprovision_ would break every existing caller.
+  - var-naming[no-role-prefix]

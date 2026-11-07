@@ -1,0 +1,22 @@
+---
+# roles/proxmox_deprovision/tasks/deprovision_vm.yml
+# Per-VM deprovision orchestrator.
+
+- name: Resolve variables
+  ansible.builtin.import_tasks: resolve_vars.yml
+
+- name: Remove VM DNS records from Technitium DNS
+  ansible.builtin.import_tasks: technitium_dns.yml
+
+- name: Delete the VM from Proxmox if it exists
+  ansible.builtin.import_tasks: proxmox.yml
+
+# After the VM is destroyed, so it can't re-register the account in the meantime.
+- name: Delete the AD computer object of a Windows VM
+  ansible.builtin.include_tasks: active_directory.yml
+  when:
+    - vm_is_windows | bool
+    - ad_cleanup | bool
+
+- name: Remove matching NetBox IP address records if enabled
+  ansible.builtin.import_tasks: netbox.yml

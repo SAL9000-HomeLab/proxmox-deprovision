@@ -1,0 +1,142 @@
+---
+# roles/proxmox_deprovision/tasks/resolve_vars.yml
+
+- name: Prepare safe defaults
+  ansible.builtin.set_fact:
+    proxmox_cb: "{{ proxmox_merged if (proxmox_merged is defined) else {} }}"
+    proxmox_defaults_cb: "{{ proxmox_defaults if (proxmox_defaults is defined) else {} }}"
+  run_once: false
+
+- name: Prepare VM variables
+  ansible.builtin.set_fact:
+    # The node the lookup runs on: any node of the cluster. The VM is deleted on the node it's actually on.
+    lookup_node: >-
+      {{ vm_item.node
+         | default( proxmox_cb.get('node') | default(proxmox_defaults_cb.get('node','pve01')) ) }}
+    vm_name: "{{ vm_item.name | default(vm_item.vmid | string) }}"
+    vmid: >-
+      {{ vm_item.vmid | default(0) | int }}
+    delete_force: "{{ vm_item.force | default(true) | bool }}"
+    delete_timeout: >-
+      {{ proxmox_cb.get('timeout', proxmox_defaults_cb.get('timeout', 300)) | int }}
+    snippets_dir: >-
+      {{ proxmox_cb.get('snippets_dir', proxmox_defaults_cb.get('snippets_dir', '/var/lib/vz/snippets'))
+         | regex_replace('/+$', '') }}
+  run_once: false
+
+- name: Validate VM target
+  ansible.builtin.assert:
+    that:
+      - vmid is defined
+      - (vmid | int) > 0
+    fail_msg: "Each vms_to_delete item must define a positive vmid."
+
+# --- Find the VM in the cluster -------------------------------------------------------------------------------------
+# qm only sees the VMs of the node it runs on, so look the VMID up in the cluster-wide list and delete it on its own
+# node. Refuse anything that isn't this entry's VM before changing anything: a container or a template with that VMID,
+# or a VM whose name differs from the entry's name.
+- name: List the cluster's VMs, templates and containers
+  ansible.builtin.command:
+    cmd: pvesh get /cluster/resources --type vm --output-format json
+  delegate_to: "{{ lookup_node }}"
+  become: true
+  register: cluster_vms
+  changed_when: false
+
+- name: Read the lookup node's Proxmox name
+  ansible.builtin.command:
+    cmd: pvesh get /cluster/status --output-format json
+  delegate_to: "{{ lookup_node }}"
+  become: true
+  register: cluster_status
+  changed_when: false
+
+- name: Find the VMID in the cluster
+  ansible.builtin.set_fact:
+    # template: 0 unless Proxmox says otherwise, so the checks below can test it on every entry
+    vm_resource: >-
+      {{ ([{'template': 0}] | product(cluster_vms.stdout | from_json
+          | selectattr('vmid', 'equalto', vmid | int) | list) | map('combine') | list + [{}]) | first }}
+    lookup_pve_node: >-
+      {{ ((cluster_status.stdout | from_json | selectattr('type', 'equalto', 'node')
+           | selectattr('local', 'defined') | selectattr('local', 'equalto', 1) | map(attribute='name') | list)
+          + [lookup_node | regex_replace('[.].*$', '')]) | first }}
+
+- name: Fail when the VMID isn't in the cluster
+  ansible.builtin.fail:
+    msg: "VMID {{ vmid }} ({{ vm_name }}) isn't in the Proxmox cluster; nothing was changed."
+  when: vm_resource.vmid is not defined
+
+- name: Fail when the VMID isn't this entry's VM
+  ansible.builtin.fail:
+    msg: >-
+      VMID {{ vmid }} is {{ 'a container' if vm_resource.type != 'qemu'
+      else ('the template' if (vm_resource.template | int) == 1 else 'the VM') }}
+      {{ vm_resource.name | default('(no name)') }} on {{ vm_resource.node }}
+      {{- ', not ' ~ vm_item.name
+          if (vm_item.name is defined and (vm_resource.name | default('') | upper) != (vm_item.name | upper))
+          else '' }}. Nothing was changed: check the vmid.
+  when: >-
+    vm_resource.type != 'qemu'
+    or (vm_resource.template | int) == 1
+    or (vm_item.name is defined and (vm_resource.name | default('') | upper) != (vm_item.name | upper))
+
+# qm commands for the VM run on its node: the lookup node itself, or the inventory host named after it
+# (pveNN or pveNN.<domain>) in the proxmox group.
+- name: Find the inventory host for the VM's node
+  ansible.builtin.set_fact:
+    node_name: >-
+      {{ lookup_node if vm_resource.node == lookup_pve_node
+         else ((groups['proxmox'] | default([]) | select('match', '^' ~ vm_resource.node ~ '([.]|$)') | list)
+               + ['']) | first }}
+
+- name: Fail when the VM's node isn't in the inventory
+  ansible.builtin.fail:
+    msg: >-
+      {{ vm_name }} (VMID {{ vmid }}) is on Proxmox node {{ vm_resource.node }}, which has no host in the inventory's
+      proxmox group (named {{ vm_resource.node }} or {{ vm_resource.node }}.<domain>). Add it, or set node on the
+      entry to that node's inventory host. Nothing was changed.
+  when: node_name | length == 0
+
+- name: Show the VM to delete
+  ansible.builtin.debug:
+    msg: >-
+      Deleting {{ vm_resource.name | default(vm_name) }} (VMID {{ vmid }}) on {{ vm_resource.node }}
+      ({{ node_name }})
+
+- name: Read VM configuration before deletion
+  ansible.builtin.command:
+    cmd: "qm config {{ vmid }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: qm_config
+  changed_when: false
+
+# A VM without a static ipconfig0 (DHCP, or a deploy that failed before it got an IP) has no address to clean up.
+- name: Resolve the VM IPv4 address for DNS cleanup
+  ansible.builtin.set_fact:
+    vm_ip_address: >-
+      {{ ((qm_config.stdout | regex_findall('(?m)^ipconfig0:.*?ip=([0-9.]+)(?:/[0-9]+)?')) + ['']) | first }}
+  run_once: false
+
+- name: Resolve the VM reverse lookup name for DNS cleanup
+  ansible.builtin.set_fact:
+    vm_reverse_name: >-
+      {{ ((vm_ip_address.split('.') | reverse | join('.')) ~ '.in-addr.arpa') if vm_ip_address | length > 0 else '' }}
+  run_once: false
+
+# Windows when the VM's Proxmox OS type is a Windows one (they all start with "w": win11 for Windows Server
+# 2025, win10, w2k8, ...); os_type on the entry overrides it. Only Windows VMs have an AD computer object.
+- name: Work out the VM's OS and AD computer name
+  ansible.builtin.set_fact:
+    vm_ostype: >-
+      {{ ((qm_config.stdout | regex_findall('(?m)^ostype: (\S+)')) + ['other']) | first }}
+    vm_proxmox_name: >-
+      {{ ((qm_config.stdout | regex_findall('(?m)^name: (\S+)')) + [vm_name]) | first }}
+
+- name: Set the VM's OS and AD computer name
+  ansible.builtin.set_fact:
+    vm_is_windows: >-
+      {{ (vm_item.os_type == 'windows') if vm_item.os_type is defined else (vm_ostype is match('w')) }}
+    # proxmox-deploy names the computer after the VM (uppercase), unless the VM had its own hostname.
+    ad_computer_name: "{{ (vm_item.ad_computer_name | default(vm_item.hostname | default(vm_proxmox_name))) | upper }}"

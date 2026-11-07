@@ -1,0 +1,102 @@
+---
+# Remove the VM's forward A record and any PTR records found for its IP.
+
+- name: Resolve Technitium DNS settings
+  ansible.builtin.set_fact:
+    technitium_dns_resolved_api_url: >-
+      {{ (technitium_dns | default({})).api_url | default(technitium_dns_api_url | default('')) }}
+    technitium_dns_resolved_api_port: "{{ (technitium_dns | default({})).api_port | default(5380) | int }}"
+    technitium_dns_resolved_token: >-
+      {{ (technitium_dns | default({})).api_token
+         | default((technitium_dns | default({})).token | default(technitium_dns_api_token | default(''))) }}
+    technitium_dns_resolved_zone: "{{ vm_item.dns_zone | default((technitium_dns | default({})).zone | default('')) }}"
+    technitium_dns_resolved_validate_certs: "{{ (technitium_dns | default({})).validate_certs | default(true) | bool }}"
+  run_once: false
+
+- name: Resolve the Technitium DNS record name
+  ansible.builtin.set_fact:
+    technitium_dns_resolved_name: "{{ vm_item.dns_name | default(vm_name ~ '.' ~ technitium_dns_resolved_zone) }}"
+  run_once: false
+
+- name: Validate Technitium DNS configuration for cleanup
+  ansible.builtin.assert:
+    that:
+      - technitium_dns_resolved_api_url | length > 0
+      - technitium_dns_resolved_token | length > 0
+      - technitium_dns_resolved_zone | length > 0
+      - vm_ip_address | length > 0
+    fail_msg: >-
+      Technitium DNS cleanup is enabled but api_url, api_token, zone, or the VM's IPv4 address is missing.
+  when: (technitium_dns | default({})).enabled | default(true) | bool
+
+- name: Find PTR records for the VM IP
+  effectivelywild.technitium_dns.technitium_dns_get_record:
+    api_url: "{{ technitium_dns_resolved_api_url }}"
+    api_port: "{{ technitium_dns_resolved_api_port }}"
+    api_token: "{{ technitium_dns_resolved_token }}"
+    validate_certs: "{{ technitium_dns_resolved_validate_certs }}"
+    name: "{{ vm_reverse_name }}"
+  register: technitium_dns_ptr_lookup
+  # get_record fails when nothing matches (or the reverse zone doesn't exist);
+  # for cleanup that just means there's nothing to delete. Other API errors
+  # (auth, connectivity) still fail the job.
+  failed_when:
+    - technitium_dns_ptr_lookup.failed | default(false)
+    - technitium_dns_ptr_lookup.msg | default('') is not search('No records found|No such zone')
+  when:
+    - (technitium_dns | default({})).enabled | default(true) | bool
+    - technitium_dns_resolved_api_url | length > 0
+    - technitium_dns_resolved_token | length > 0
+    - vm_ip_address | length > 0
+
+- name: Log when there are no PTR records to remove
+  ansible.builtin.debug:
+    msg: >-
+      No PTR records found for {{ vm_reverse_name }} ({{ vm_ip_address }});
+      skipping PTR cleanup.
+  when:
+    - technitium_dns_ptr_lookup is not skipped
+    - technitium_dns_ptr_lookup.records | default([]) | length == 0
+
+- name: Delete PTR records that point to this VM name
+  effectivelywild.technitium_dns.technitium_dns_delete_record:
+    api_url: "{{ technitium_dns_resolved_api_url }}"
+    api_port: "{{ technitium_dns_resolved_api_port }}"
+    api_token: "{{ technitium_dns_resolved_token }}"
+    validate_certs: "{{ technitium_dns_resolved_validate_certs }}"
+    name: "{{ item.name }}"
+    type: PTR
+    ptrName: "{{ item.rData.ptrName }}"
+  loop: "{{ technitium_dns_ptr_lookup.records | default([]) }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.rData.ptrName | default('') }}"
+  when:
+    - (technitium_dns | default({})).enabled | default(true) | bool
+    - item.type | default('') == 'PTR'
+    - item.rData.ptrName | default('') | lower == technitium_dns_resolved_name | lower
+
+- name: Delete VM A record
+  effectivelywild.technitium_dns.technitium_dns_delete_record:
+    api_url: "{{ technitium_dns_resolved_api_url }}"
+    api_port: "{{ technitium_dns_resolved_api_port }}"
+    api_token: "{{ technitium_dns_resolved_token }}"
+    validate_certs: "{{ technitium_dns_resolved_validate_certs }}"
+    name: "{{ technitium_dns_resolved_name }}"
+    zone: "{{ technitium_dns_resolved_zone }}"
+    type: A
+    ipAddress: "{{ vm_ip_address }}"
+  register: technitium_dns_a_delete
+  when:
+    - (technitium_dns | default({})).enabled | default(true) | bool
+    - technitium_dns_resolved_api_url | length > 0
+    - technitium_dns_resolved_token | length > 0
+    - vm_ip_address | length > 0
+
+- name: Log when there was no A record to remove
+  ansible.builtin.debug:
+    msg: >-
+      No A record found for {{ technitium_dns_resolved_name }} -> {{ vm_ip_address }};
+      skipping A record cleanup. ({{ technitium_dns_a_delete.msg | default('') }})
+  when:
+    - technitium_dns_a_delete is not skipped
+    - not (technitium_dns_a_delete.changed | default(false))

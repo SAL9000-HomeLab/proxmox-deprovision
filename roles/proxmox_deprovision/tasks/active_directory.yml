@@ -1,0 +1,52 @@
+---
+# roles/proxmox_deprovision/tasks/active_directory.yml
+# Delete a Windows VM's AD computer object (and its child objects, e.g. BitLocker recovery information) after the
+# VM is gone. Runs on ad_cleanup_host; the delete itself authenticates as ad_cleanup_user.
+
+- name: Warn that the AD computer object is left in place
+  ansible.builtin.debug:
+    msg: >-
+      {{ vm_proxmox_name }} is a Windows VM, but ad_cleanup_host isn't set, so its AD computer object
+      ({{ ad_computer_name }}) was not deleted. Set ad_cleanup_host to an inventory host with the ActiveDirectory
+      PowerShell module (or ad_cleanup: false to stop this warning).
+  when: ad_cleanup_host | length == 0
+
+- name: Delete the AD computer object
+  when: ad_cleanup_host | length > 0
+  block:
+    - name: Check the AD cleanup host and account are set
+      ansible.builtin.assert:
+        that:
+          - ad_cleanup_host in hostvars
+          - ad_cleanup_user | length > 0
+          - ad_cleanup_password | length > 0
+        fail_msg: >-
+          AD cleanup for {{ vm_proxmox_name }}: ad_cleanup_host ({{ ad_cleanup_host }}) must be an inventory host, and
+          ad_cleanup_user / ad_cleanup_password (default: domain_join_user / domain_join_pass) must be set.
+        quiet: true
+
+    # A bare user name gets @<domain_name>. (A regex, because Jinja string literals don't unescape backslashes.)
+    - name: Work out the AD account
+      ansible.builtin.set_fact:
+        ad_cleanup_account: >-
+          {{ ad_cleanup_user
+             if (ad_cleanup_user is search('[@\\\\]') or (domain_name | default('')) | length == 0)
+             else ad_cleanup_user ~ '@' ~ domain_name }}
+
+    - name: Delete the computer account {{ ad_computer_name }}
+      microsoft.ad.computer:
+        identity: "{{ ad_computer_name }}$"
+        state: absent
+        domain_username: "{{ ad_cleanup_account }}"
+        domain_password: "{{ ad_cleanup_password }}"
+        domain_server: "{{ ad_cleanup_domain_server if ad_cleanup_domain_server | length > 0 else omit }}"
+      # Ansible templates delegate_to before it evaluates when, so it needs a host name even when this is skipped.
+      delegate_to: "{{ ad_cleanup_host if ad_cleanup_host | length > 0 else inventory_hostname }}"
+      register: ad_computer_delete
+
+    - name: Report the AD cleanup
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('Deleted the AD computer object ' ~ ad_computer_name)
+             if ad_computer_delete is changed
+             else ('No AD computer object ' ~ ad_computer_name ~ ' found; nothing to delete') }}.
