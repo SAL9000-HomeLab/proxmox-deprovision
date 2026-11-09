@@ -126,17 +126,16 @@
   run_once: false
 
 # Windows when the VM's Proxmox OS type is a Windows one (they all start with "w": win11 for Windows Server
-# 2025, win10, w2k8, ...); os_type on the entry overrides it. Only Windows VMs have an AD computer object.
-- name: Work out the VM's OS and AD computer name
+# 2025, win10, w2k8, ...); os_type on the entry overrides it. It decides how the guest is asked about its domain
+# membership (domain_membership.yml).
+- name: Work out the VM's OS
   ansible.builtin.set_fact:
     vm_ostype: >-
       {{ ((qm_config.stdout | regex_findall('(?m)^ostype: (\S+)')) + ['other']) | first }}
     vm_proxmox_name: >-
       {{ ((qm_config.stdout | regex_findall('(?m)^name: (\S+)')) + [vm_name]) | first }}
 
-- name: Set the VM's OS and AD computer name
+- name: Set the VM's OS
   ansible.builtin.set_fact:
     vm_is_windows: >-
       {{ (vm_item.os_type == 'windows') if vm_item.os_type is defined else (vm_ostype is match('w')) }}
-    # proxmox-deploy names the computer after the VM (uppercase), unless the VM had its own hostname.
-    ad_computer_name: "{{ (vm_item.ad_computer_name | default(vm_item.hostname | default(vm_proxmox_name))) | upper }}"

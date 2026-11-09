@@ -1,0 +1,89 @@
+---
+# roles/proxmox_deprovision/tasks/domain_membership.yml
+# Ask the guest, before the VM is destroyed, whether it is joined to a domain and under which computer name. Runs
+# over the QEMU guest agent on the VM's node, so it needs no network access to the VM. Sets:
+#   vm_domain_state: joined, not_joined, or unknown (the VM isn't running or its agent didn't answer)
+#   vm_joined_domain: the domain the guest is joined to ('' unless joined)
+#   ad_computer_name: the computer account name, without the trailing $ (an entry's ad_computer_name wins)
+
+- name: Assume the domain membership is unknown
+  ansible.builtin.set_fact:
+    vm_domain_state: unknown
+    vm_joined_domain: ""
+    vm_guest_computer_name: ""
+
+- name: Check whether the VM is running
+  ansible.builtin.command:
+    cmd: "qm status {{ vmid }}"
+  delegate_to: "{{ node_name }}"
+  become: true
+  register: vm_power_state
+  changed_when: false
+
+- name: Ask the guest about its domain membership
+  when: "'status: running' in vm_power_state.stdout"
+  block:
+    # Windows: Win32_ComputerSystem knows the domain and the computer (NetBIOS) name. Linux: realm lists the domains
+    # realmd joined (ans-ldap-auth and proxmox-deploy use it), and adcli names the computer after the short host
+    # name. The single quotes keep $ away from the shell; expand_argument_vars keeps it away from Ansible.
+    - name: Query the guest over the QEMU guest agent
+      ansible.builtin.command:
+        argv: >-
+          {{ ['qm', 'guest', 'exec', vmid | string, '--timeout', '30', '--']
+             + (['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                 '$cs = Get-CimInstance -ClassName Win32_ComputerSystem; '
+                 ~ '[pscustomobject]@{ joined = [bool]$cs.PartOfDomain; domain = $cs.Domain; name = $cs.Name } '
+                 ~ '| ConvertTo-Json -Compress']
+                if vm_is_windows | bool else
+                ['sh', '-c', 'hostname -s; command -v realm >/dev/null 2>&1 && realm list --name-only; true']) }}
+        expand_argument_vars: false
+      delegate_to: "{{ node_name }}"
+      become: true
+      register: vm_guest_domain_query
+      changed_when: false
+      failed_when: false
+
+    - name: Read the guest's answer
+      ansible.builtin.set_fact:
+        vm_guest_domain_answer: >-
+          {{ (vm_guest_domain_query.stdout | from_json)['out-data'] | default('') | trim
+             if vm_guest_domain_query.rc == 0
+                and (vm_guest_domain_query.stdout | from_json).exitcode | default(1) == 0
+             else '' }}
+
+    - name: Work out the Windows guest's membership
+      ansible.builtin.set_fact:
+        vm_domain_state: "{{ 'joined' if (vm_guest_domain_answer | from_json).joined else 'not_joined' }}"
+        vm_joined_domain: >-
+          {{ (vm_guest_domain_answer | from_json).domain if (vm_guest_domain_answer | from_json).joined else '' }}
+        vm_guest_computer_name: "{{ (vm_guest_domain_answer | from_json).name }}"
+      when:
+        - vm_is_windows | bool
+        - vm_guest_domain_answer is match('[{]')
+
+    # First line: the short host name; the rest: the joined domains (none when not joined).
+    - name: Work out the Linux guest's membership
+      ansible.builtin.set_fact:
+        vm_domain_state: "{{ 'joined' if vm_guest_domain_answer.splitlines()[1:] | select | list else 'not_joined' }}"
+        vm_joined_domain: "{{ (vm_guest_domain_answer.splitlines()[1:] | select | list + ['']) | first }}"
+        vm_guest_computer_name: "{{ vm_guest_domain_answer.splitlines()[0] }}"
+      when:
+        - not vm_is_windows | bool
+        - vm_guest_domain_answer | length > 0
+
+# AD computer names (sAMAccountName without the $) are 15 characters at most; adcli truncates longer host names.
+- name: Work out the AD computer name
+  ansible.builtin.set_fact:
+    ad_computer_name: >-
+      {{ (vm_item.ad_computer_name
+          | default(vm_guest_computer_name if vm_guest_computer_name | length > 0
+                    else vm_item.hostname | default(vm_proxmox_name)))[:15] | upper }}
+
+- name: Show the domain membership
+  ansible.builtin.debug:
+    msg: >-
+      {{ vm_proxmox_name }}:
+      {{ {'joined': 'joined to ' ~ vm_joined_domain ~ ' as ' ~ ad_computer_name,
+          'not_joined': 'not joined to a domain, so there is no AD computer object to delete',
+          'unknown': 'domain membership unknown (the VM is not running or its guest agent did not answer)'}
+         [vm_domain_state] }}

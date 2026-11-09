@@ -8,15 +8,20 @@
 - name: Remove VM DNS records from Technitium DNS
   ansible.builtin.import_tasks: technitium_dns.yml
 
+# Before the VM is destroyed: the guest itself says whether, where and as what it is joined.
+- name: Ask the guest whether it is joined to a domain
+  ansible.builtin.include_tasks: domain_membership.yml
+  when: ad_cleanup | bool
+
 - name: Delete the VM from Proxmox if it exists
   ansible.builtin.import_tasks: proxmox.yml
 
 # After the VM is destroyed, so it can't re-register the account in the meantime.
-- name: Delete the AD computer object of a Windows VM
+- name: Delete the AD computer object of a domain-joined VM
   ansible.builtin.include_tasks: active_directory.yml
   when:
-    - vm_is_windows | bool
     - ad_cleanup | bool
+    - vm_domain_state != 'not_joined'
 
 - name: Remove matching NetBox IP address records if enabled
   ansible.builtin.import_tasks: netbox.yml
