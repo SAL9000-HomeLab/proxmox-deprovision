@@ -5,6 +5,12 @@ pushing a `vX.Y.Z` tag; the release workflow publishes the matching section.
 
 ## [Unreleased]
 
+- Added: AD cleanup for Linux VMs, and a membership check for every VM. Before the VM is destroyed, the guest is asked
+  over the QEMU guest agent whether it is joined to a domain (Windows: `Win32_ComputerSystem`; Linux: `realm list`) and
+  under which computer name; only joined VMs have their AD computer object deleted, and only in `domain_name`'s domain.
+  When the guest can't be asked (VM stopped, no agent), the object named after the VM is deleted only when its
+  `operatingSystem` matches the VM's OS (`ad_cleanup_unverified`, default `true`). Linux computer names are truncated
+  to 15 characters, as adcli does.
 - Changed: The repository was recreated with new history, because the old history had real lab names and addresses.
   Earlier PR numbers no longer exist and are removed from this file.
 - Fixed: a VM on another node than `proxmox.node` couldn't be deleted ("not found on node"; `qm` only sees its own

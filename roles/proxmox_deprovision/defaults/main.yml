@@ -24,12 +24,18 @@ technitium_dns:
 netbox_cleanup: true
 
 # --- Active Directory ---
-# Windows VMs (template ostype win*, or os_type: windows on the entry) have their AD computer object deleted after
-# the VM is destroyed. The delete runs on ad_cleanup_host, an inventory host with the ActiveDirectory PowerShell
-# module (a domain controller, or a server with RSAT-AD-PowerShell) reached over WinRM/PSRP with the connection
-# settings it has in the inventory. "" skips the AD cleanup (a Windows VM's object is then left, with a warning).
+# Before a VM is destroyed, the guest is asked over the QEMU guest agent whether it is joined to a domain (Windows:
+# Win32_ComputerSystem; Linux: realm list) and under which computer name. A joined VM, Windows or Linux, has that AD
+# computer object deleted after the VM is destroyed. The delete runs on ad_cleanup_host, an inventory host with the
+# ActiveDirectory PowerShell module (a domain controller, or a server with RSAT-AD-PowerShell) reached over
+# WinRM/PSRP with the connection settings it has in the inventory. "" skips the AD cleanup (a joined VM's object is
+# then left, with a warning).
 ad_cleanup: true
 ad_cleanup_host: ""
+
+# When the guest can't be asked (VM stopped, no guest agent): look up the computer account named after the VM and
+# delete it only when AD says it runs the VM's OS (Windows, or not Windows). false leaves such VMs' objects alone.
+ad_cleanup_unverified: true
 
 # Account that deletes the computer object (it needs "Delete Computer objects" on the OUs). Defaults to the
 # domain-join account proxmox-deploy uses. DOMAIN\user or user@domain; a bare name gets @<domain_name>.

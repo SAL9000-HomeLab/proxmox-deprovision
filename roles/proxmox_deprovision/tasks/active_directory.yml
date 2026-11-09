@@ -1,18 +1,52 @@
 ---
 # roles/proxmox_deprovision/tasks/active_directory.yml
-# Delete a Windows VM's AD computer object (and its child objects, e.g. BitLocker recovery information) after the
-# VM is gone. Runs on ad_cleanup_host; the delete itself authenticates as ad_cleanup_user.
+# Delete the VM's AD computer object (and its child objects, e.g. BitLocker recovery information) after the VM is
+# gone, Windows or Linux. domain_membership.yml asked the guest first:
+#   joined:     delete the computer account the guest was joined with, when it is in domain_name's domain
+#   not_joined: nothing to do
+#   unknown:    the guest couldn't be asked; with ad_cleanup_unverified, delete the account named after the VM only
+#               when AD says it runs the VM's OS (Windows or not), so an unrelated computer of that name is kept
+# Runs on ad_cleanup_host; the AD requests authenticate as ad_cleanup_user.
+
+- name: Work out whether to look in AD
+  ansible.builtin.set_fact:
+    ad_cleanup_domain_matches: >-
+      {{ vm_domain_state != 'joined' or (domain_name | default('')) | length == 0
+         or (vm_joined_domain | lower) == (domain_name | lower) }}
+    ad_cleanup_wanted: >-
+      {{ vm_domain_state == 'joined' or (vm_domain_state == 'unknown' and ad_cleanup_unverified | bool) }}
+
+- name: Report that an unverified VM's AD object is left alone
+  ansible.builtin.debug:
+    msg: >-
+      {{ vm_proxmox_name }}'s domain membership is unknown and ad_cleanup_unverified is off, so AD was not checked
+      for {{ ad_computer_name }}.
+  when: vm_domain_state == 'unknown' and not ad_cleanup_unverified | bool
+
+- name: Warn that the VM is joined to another domain
+  ansible.builtin.debug:
+    msg: >-
+      {{ vm_proxmox_name }} was joined to {{ vm_joined_domain }}, not {{ domain_name }}, so its AD computer object
+      ({{ ad_computer_name }}) was not deleted. Delete it in that domain.
+  when: not ad_cleanup_domain_matches | bool
 
 - name: Warn that the AD computer object is left in place
   ansible.builtin.debug:
     msg: >-
-      {{ vm_proxmox_name }} is a Windows VM, but ad_cleanup_host isn't set, so its AD computer object
+      {{ vm_proxmox_name }} {{ 'was joined to the domain' if vm_domain_state == 'joined'
+      else 'may have been joined to the domain' }}, but ad_cleanup_host isn't set, so its AD computer object
       ({{ ad_computer_name }}) was not deleted. Set ad_cleanup_host to an inventory host with the ActiveDirectory
       PowerShell module (or ad_cleanup: false to stop this warning).
-  when: ad_cleanup_host | length == 0
+  when:
+    - ad_cleanup_wanted | bool
+    - ad_cleanup_domain_matches | bool
+    - ad_cleanup_host | length == 0
 
 - name: Delete the AD computer object
-  when: ad_cleanup_host | length > 0
+  when:
+    - ad_cleanup_wanted | bool
+    - ad_cleanup_domain_matches | bool
+    - ad_cleanup_host | length > 0
   block:
     - name: Check the AD cleanup host and account are set
       ansible.builtin.assert:
@@ -33,6 +67,38 @@
              if (ad_cleanup_user is search('[@\\\\]') or (domain_name | default('')) | length == 0)
              else ad_cleanup_user ~ '@' ~ domain_name }}
 
+    # Only when the guest couldn't be asked: check the object's operatingSystem (Windows sets "Windows ...", adcli
+    # sets the Linux distribution) before deleting anything.
+    - name: Look up the computer account {{ ad_computer_name }}
+      microsoft.ad.object_info:
+        identity: "{{ ad_computer_name }}$"
+        properties: [operatingSystem]
+        domain_username: "{{ ad_cleanup_account }}"
+        domain_password: "{{ ad_cleanup_password }}"
+        domain_server: "{{ ad_cleanup_domain_server if ad_cleanup_domain_server | length > 0 else omit }}"
+      # Ansible templates delegate_to before it evaluates when, so it needs a host name even when this is skipped.
+      delegate_to: "{{ ad_cleanup_host if ad_cleanup_host | length > 0 else inventory_hostname }}"
+      register: ad_computer_lookup
+      when: vm_domain_state == 'unknown'
+
+    - name: Decide whether to delete the computer account
+      ansible.builtin.set_fact:
+        ad_computer_os: >-
+          {{ ((ad_computer_lookup.objects | default([]) | map(attribute='operatingSystem', default='') | list)
+              + ['']) | first | default('', true) }}
+        ad_computer_found: "{{ ad_computer_lookup.objects | default([]) | length > 0 }}"
+
+    - name: Report a computer account left in place because it runs another OS
+      ansible.builtin.debug:
+        msg: >-
+          {{ vm_proxmox_name }}'s domain membership is unknown, and the AD computer object {{ ad_computer_name }}
+          runs {{ ad_computer_os or 'an unknown OS' }}, not {{ 'Windows' if vm_is_windows | bool else 'Linux' }}, so
+          it may be another computer and was not deleted. Set ad_computer_name on the entry, or delete it yourself.
+      when:
+        - vm_domain_state == 'unknown'
+        - ad_computer_found | bool
+        - (ad_computer_os is match('(?i)windows')) != (vm_is_windows | bool) or ad_computer_os | length == 0
+
     - name: Delete the computer account {{ ad_computer_name }}
       microsoft.ad.computer:
         identity: "{{ ad_computer_name }}$"
@@ -40,13 +106,18 @@
         domain_username: "{{ ad_cleanup_account }}"
         domain_password: "{{ ad_cleanup_password }}"
         domain_server: "{{ ad_cleanup_domain_server if ad_cleanup_domain_server | length > 0 else omit }}"
-      # Ansible templates delegate_to before it evaluates when, so it needs a host name even when this is skipped.
       delegate_to: "{{ ad_cleanup_host if ad_cleanup_host | length > 0 else inventory_hostname }}"
       register: ad_computer_delete
+      when: >-
+        vm_domain_state == 'joined'
+        or (ad_computer_found | bool and ad_computer_os | length > 0
+            and (ad_computer_os is match('(?i)windows')) == (vm_is_windows | bool))
 
     - name: Report the AD cleanup
       ansible.builtin.debug:
         msg: >-
           {{ ('Deleted the AD computer object ' ~ ad_computer_name)
              if ad_computer_delete is changed
-             else ('No AD computer object ' ~ ad_computer_name ~ ' found; nothing to delete') }}.
+             else ('No AD computer object ' ~ ad_computer_name ~ ' found; nothing to delete')
+             if (vm_domain_state == 'joined' or not ad_computer_found | bool)
+             else ('AD computer object ' ~ ad_computer_name ~ ' left in place') }}.

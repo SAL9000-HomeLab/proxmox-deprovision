@@ -1,7 +1,7 @@
 # proxmox-deprovision
 
 This repository deprovisions VMs from Proxmox and cleans up after them: matching NetBox IP address records,
-Technitium DNS records and, for Windows VMs, the Active Directory computer object.
+Technitium DNS records and, for domain-joined VMs (Windows or Linux), the Active Directory computer object.
 
 ## Role layout
 
@@ -33,7 +33,7 @@ technitium_dns:
   validate_certs: false
   zone: "lab.example.com"
 
-# Windows VMs: the inventory host that deletes AD computer objects (see "Active Directory cleanup")
+# Domain-joined VMs: the inventory host that deletes AD computer objects (see "Active Directory cleanup")
 ad_cleanup_host: mgmt-01.ad.example.com
 
 vms_to_delete:
@@ -57,10 +57,11 @@ The role will:
 
 1. Find the VMID in the cluster and check it's the entry's VM (see below); stop before changing anything if not.
 2. Query the VM's configured IPv4 address and remove matching Technitium PTR and A records when enabled.
-3. Delete the VM from Proxmox using `qm destroy --purge`. This always deletes the VM's disks.
-4. Remove the VM's `user-data-<vmid>` / `cloudbase-<vmid>` snippets left by proxmox-deploy.
-5. For a Windows VM, delete its AD computer object (see below).
-6. When cleanup is enabled, search NetBox for the VM and delete only the IP address records that
+3. Ask the guest whether it's joined to a domain (see [Active Directory cleanup](#active-directory-cleanup)).
+4. Delete the VM from Proxmox using `qm destroy --purge`. This always deletes the VM's disks.
+5. Remove the VM's `user-data-<vmid>` / `cloudbase-<vmid>` snippets left by proxmox-deploy.
+6. For a domain-joined VM, delete its AD computer object (see below).
+7. When cleanup is enabled, search NetBox for the VM and delete only the IP address records that
    match exactly: same address as the VM's `ipconfig0`, or a `dns_name` whose host part is the VM
    name.
 
@@ -89,19 +90,34 @@ The play runs on every host in the `proxmox` group, but the list is processed on
 
 ## Active Directory cleanup
 
-A VM is treated as Windows when its Proxmox OS type (`ostype`) is a Windows one (`win11` for Windows Server 2025;
-they all start with `w`), the same rule proxmox-deploy uses; `os_type: windows` or `linux` on the entry overrides
-it. After the VM is destroyed, its computer account is deleted with `microsoft.ad.computer` (`state: absent`),
-child objects such as BitLocker recovery information included. A computer that's already gone is reported and
-skipped, so re-runs are safe.
+Before the VM is destroyed, the job asks the guest over the QEMU guest agent (on the VM's node, so the VM needs no
+network access) whether it's joined to a domain and under which computer name:
 
-- **Which object:** `<NAME>$`, the VM's Proxmox name in capitals (proxmox-deploy names the computer after the
-  VM). Set `ad_computer_name` on the entry when it differs, e.g. a VM deployed with its own `hostname`.
+- **Windows** (Proxmox `ostype` starting with `w`, the rule proxmox-deploy uses): `Win32_ComputerSystem` gives the
+  domain and the computer name.
+- **Linux:** `realm list` gives the domains realmd joined (proxmox-deploy and ans-ldap-auth join with it), and the
+  computer name is the short host name, cut to 15 characters and capitalised as adcli does.
+
+`os_type: windows` or `linux` on the entry overrides the OS. Then:
+
+| Guest says | What happens |
+| --- | --- |
+| joined to `domain_name`'s domain (or `domain_name` is unset) | the computer account is deleted after the VM is destroyed |
+| joined to another domain | nothing is deleted; the job log names the domain |
+| not joined | nothing to delete |
+| no answer (VM stopped, no guest agent) | with `ad_cleanup_unverified` (default), the account named after the VM is deleted only when AD's `operatingSystem` for it matches the VM's OS (Windows, or not), so a different computer with that name is kept; otherwise it's left alone |
+
+The delete uses `microsoft.ad.computer` (`state: absent`), child objects such as BitLocker recovery information
+included. A computer that's already gone is reported and skipped, so re-runs are safe.
+
+- **Which object:** `<NAME>$`, the name the guest reports; when it can't be asked, the VM's Proxmox name in capitals
+  (proxmox-deploy names the computer after the VM), cut to 15 characters. Set `ad_computer_name` on the entry to
+  name it yourself.
 - **Where it runs:** on `ad_cleanup_host`, an inventory host with the ActiveDirectory PowerShell module: a
   domain controller, or a member server with `RSAT-AD-PowerShell`. The play connects to it only for this task,
   over PSRP with the connection settings it has in the inventory
   ([inventory/hosts.yml](inventory/hosts.yml) has an example in the `ad_management` group). With
-  `ad_cleanup_host` unset, Windows VMs' objects are left in place and the job log says so.
+  `ad_cleanup_host` unset, joined VMs' objects are left in place and the job log says so.
 - **Who deletes it:** `ad_cleanup_user` / `ad_cleanup_password`, by default the domain-join account
   (`domain_join_user` / `domain_join_pass`, the credential proxmox-deploy uses). It needs **Delete Computer
   objects** on the OUs the servers live in, as well as the usual Create. A bare user name gets `@<domain_name>`
@@ -119,11 +135,12 @@ skipped, so re-runs are safe.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ad_cleanup` | `true` | Delete Windows VMs' AD computer objects. |
-| `ad_cleanup_host` | `""` | Inventory host that runs the delete; `""` skips it (with a warning per Windows VM). |
+| `ad_cleanup` | `true` | Check each VM's domain membership and delete joined VMs' AD computer objects. |
+| `ad_cleanup_host` | `""` | Inventory host that runs the delete; `""` skips it (with a warning per joined VM). |
+| `ad_cleanup_unverified` | `true` | When the guest can't be asked, delete the object named after the VM if its OS matches. |
 | `ad_cleanup_user` / `ad_cleanup_password` | `domain_join_user` / `domain_join_pass` | Account that deletes the object. |
 | `ad_cleanup_domain_server` | `""` | Domain controller to use (`""` = the ActiveDirectory module picks one). |
-| `ad_computer_name` (per VM) | the VM's Proxmox name | Computer account to delete. |
+| `ad_computer_name` (per VM) | the name the guest reports, else the VM's Proxmox name | Computer account to delete. |
 | `os_type` (per VM) | from the VM's `ostype` | `windows` or `linux`. |
 
 ## Development and CI
